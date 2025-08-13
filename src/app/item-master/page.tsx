@@ -1,15 +1,17 @@
 // src/app/item-master/page.tsx
+
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import * as xlsx from "xlsx"; // Corrected import
+import { utils, writeFile } from "xlsx";
 import { ItemMasterEntry } from "@/types";
 
 export default function ItemMasterPage() {
   const [items, setItems] = useState<ItemMasterEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   useEffect(() => {
     const fetchItems = async () => {
@@ -31,39 +33,97 @@ export default function ItemMasterPage() {
     fetchItems();
   }, []);
 
+  // Filter items based on search query
+  const filteredItems = useMemo(() => {
+    if (!searchQuery) {
+      return items;
+    }
+    return items.filter((item) => {
+      const name = item["Item Name"]?.toLowerCase() || "";
+      const code = item["Item Code"]?.toLowerCase() || "";
+      const query = searchQuery.toLowerCase();
+      return name.includes(query) || code.includes(query);
+    });
+  }, [items, searchQuery]);
+
   const downloadExcel = () => {
-    // Prepare data for export, formatting date for readability
-    const dataToExport = items.map((item) => ({
-      ...item,
-      "GRN Date": new Date(item["GRN Date"]).toLocaleDateString("en-GB"), // Format as DD/MM/YYYY
-      _id: undefined, // Exclude MongoDB ID from export
+    // 1. Define the exact order and headers for the export
+    const exportHeaders = [
+      "Item Code",
+      "Item Name",
+      "GRN No",
+      "Invoice No",
+      "GRN Date",
+      "Manufacturer",
+      "Vendor",
+      "Free Qty",
+      "Qty",
+      "Units",
+      "MRP",
+      "Item Cost",
+      "NetAmount",
+      "Unit Rate",
+    ];
+
+    // 2. Map the filtered data to the desired format
+    const dataToExport = filteredItems.map((item) => ({
+      "Item Code": item["Item Code"],
+      "Item Name": item["Item Name"],
+      "GRN No": item["GRN No"],
+      "Invoice No": item["Invoice No"],
+      "GRN Date": new Date(item["GRN Date"]).toLocaleDateString("en-GB"),
+      Manufacturer: item["Manufacturer"],
+      Vendor: item["Vendor"],
+      "Free Qty": item["Free Qty"],
+      Qty: item["Qty"],
+      Units: item["Units"],
+      MRP: item["MRP"],
+      "Item Cost": item["Item Cost"],
+      NetAmount: item["NetAmount"],
+      "Unit Rate": item["Unit Rate"],
     }));
 
-    const worksheet = xlsx.utils.json_to_sheet(dataToExport);
-    const workbook = xlsx.utils.book_new();
-    xlsx.utils.book_append_sheet(workbook, worksheet, "Item Master");
-    // Trigger the download
-    xlsx.writeFile(workbook, "ItemMaster_Export.xlsx");
+    // 3. Create the worksheet and workbook
+    const worksheet = utils.json_to_sheet(dataToExport, {
+      header: exportHeaders,
+    });
+    const workbook = utils.book_new();
+    utils.book_append_sheet(workbook, worksheet, "Item Master");
+
+    // 4. Trigger the download
+    writeFile(workbook, "ItemMaster_Export.xlsx");
   };
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 sm:p-6 lg:p-8">
       <div className="max-w-screen-xl mx-auto">
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <div className="flex flex-col sm:flex-row justify-between items-center">
-            <h1 className="text-3xl font-bold text-gray-800 mb-4 sm:mb-0">
-              Item Master
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+            <h1 className="text-3xl font-bold text-gray-800">
+              Item Master ({filteredItems.length})
             </h1>
+
+            {/* Search Input */}
+            <div className="w-full sm:w-1/3">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by Item Name or Code..."
+                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
             <div className="flex items-center space-x-2">
               <Link
                 href="/"
                 className="bg-gray-600 text-white py-2 px-4 rounded-md hover:bg-gray-700 transition-colors"
               >
-                &larr; Back to Dashboard
+                &larr; Dashboard
               </Link>
               <button
                 onClick={downloadExcel}
-                disabled={items.length === 0}
+                disabled={filteredItems.length === 0}
                 className="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 disabled:bg-gray-400 transition-colors"
               >
                 Download as XLS
@@ -107,8 +167,8 @@ export default function ItemMasterPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {items.length > 0 ? (
-                  items.map((item) => (
+                {filteredItems.length > 0 ? (
+                  filteredItems.map((item) => (
                     <tr
                       key={item["Item Code"]}
                       className="hover:bg-gray-50 transition-colors"
@@ -142,7 +202,7 @@ export default function ItemMasterPage() {
                 ) : (
                   <tr>
                     <td colSpan={8} className="text-center py-10 text-gray-500">
-                      No items found in the database.
+                      No items found.
                     </td>
                   </tr>
                 )}
