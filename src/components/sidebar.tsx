@@ -1,3 +1,5 @@
+// src/components/sidebar.tsx
+
 "use client";
 
 import { useState } from "react";
@@ -26,6 +28,13 @@ const navItems = [
     href: "/item-master",
     icon: Database,
   },
+  // --- VVV THIS IS THE NEW LINK VVV ---
+  {
+    name: "Stock Analysis",
+    href: "/stock-analysis",
+    icon: FileSpreadsheet, // Re-using an existing, relevant icon
+  },
+  // --- ^^^ THIS IS THE NEW LINK ^^^ ---
   {
     name: "Stock Reports",
     href: "/reports/stock",

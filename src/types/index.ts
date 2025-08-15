@@ -7,7 +7,7 @@ export interface GRNEntry {
   "S.No": number;
   "GRN No": string;
   "Invoice No": string;
-  "GRN Date": string; // Stored as a string initially, then converted
+  "GRN Date": string;
   "Item Code": string;
   "Item Name": string;
   "Free Qty": number;
@@ -23,9 +23,48 @@ export interface GRNEntry {
 
 /**
  * Interface for the data stored in the MongoDB 'itemMaster' collection.
- * The GRN Date is stored as an ISO string for consistent sorting.
  */
 export interface ItemMasterEntry extends Omit<GRNEntry, "GRN Date"> {
-  _id?: string; // MongoDB's unique identifier
-  "GRN Date": string; // Stored as ISO 8601 string (e.g., "2024-10-08T00:00:00.000Z")
+  _id?: string;
+  "GRN Date": string;
+}
+
+// --- VVV ADD THE NEW INTERFACES BELOW VVV ---
+
+/**
+ * Interface for the Item Master collection.
+ */
+export interface IItem {
+  _id?: any; // ObjectId from MongoDB
+  itemCode: string;
+  itemName: string;
+  vendor: string;
+  manufacturer: string;
+  itemType: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+/**
+
+ * Interface representing a Department in the database.
+ */
+export interface IDepartment {
+  _id?: any; // ObjectId from MongoDB
+  name: string;
+}
+
+/**
+ * Interface representing a final Stock record in the database.
+ */
+export interface IStock {
+  _id?: any; // ObjectId from MongoDB
+  itemId: any; // Storing ObjectId of the item
+  departmentId: any; // Storing ObjectId of the department
+  initial_stock: number;
+  stock_sold: number;
+  stock_transferred: number;
+  stock_used: number;
+  stock_left: number;
+  as_of_date: Date;
 }
