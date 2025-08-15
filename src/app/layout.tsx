@@ -1,16 +1,16 @@
+// src/app/layout.tsx
+
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local"; // 1. Use next/font/local
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+// 2. Configure the local font
+const nataSans = localFont({
+  src: "../../public/NataSans-VariableFont_wght.ttf",
+  display: "swap",
+  weight: "100 900", // Specify the available weight range
+  variable: "--font-nata-sans", // Assign a CSS variable
 });
 
 export const metadata: Metadata = {
@@ -25,9 +25,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      {/* 3. Apply the font variable to the <body> tag */}
+      <body className={`${nataSans.variable} font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
