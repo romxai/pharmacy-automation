@@ -1,19 +1,20 @@
 // src/app/api/upload/route.ts
 
-import { NextRequest, NextResponse } from 'next/server';
-import { MongoClient, Db } from 'mongodb';
-import { read, utils } from 'xlsx';
-import clientPromise from '@/lib/mongodb';
-import { ItemMasterEntry, GRNEntry } from '@/types';
+import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { MongoClient, Db } from "mongodb";
+import { read, utils } from "xlsx";
+import clientPromise from "@/lib/mongodb";
+import { ItemMasterEntry, GRNEntry } from "@/types";
 
-const DB_NAME = process.env.DB_NAME || 'pharmacy';
-const COLLECTION_NAME = 'itemMaster';
+const DB_NAME = process.env.DB_NAME || "pharmacy";
+const COLLECTION_NAME = "itemMaster";
 
 // This function remains the same
 const parseDate = (dateInput: string | Date): Date | null => {
   try {
     if (dateInput instanceof Date) return dateInput;
-    if (typeof dateInput !== 'string') return null;
+    if (typeof dateInput !== "string") return null;
     const parts = dateInput.split(/[-/]/);
     if (parts.length !== 3) return null;
     const day = parseInt(parts[0], 10);
@@ -32,14 +33,14 @@ const processData = (data: GRNEntry[]): Record<string, ItemMasterEntry> => {
   if (!data || data.length === 0) return itemMaster;
 
   data.forEach((row) => {
-    const itemCode = row['Item Code'];
+    const itemCode = row["Item Code"];
     if (!itemCode) return;
-    const grnDate = parseDate(row['GRN Date']);
+    const grnDate = parseDate(row["GRN Date"]);
     if (!grnDate) return;
 
     const existingEntry = itemMaster[itemCode];
-    if (!existingEntry || grnDate > new Date(existingEntry['GRN Date'])) {
-      itemMaster[itemCode] = { ...row, 'GRN Date': grnDate.toISOString() };
+    if (!existingEntry || grnDate > new Date(existingEntry["GRN Date"])) {
+      itemMaster[itemCode] = { ...row, "GRN Date": grnDate.toISOString() };
     }
   });
   return itemMaster;
@@ -48,11 +49,15 @@ const processData = (data: GRNEntry[]): Record<string, ItemMasterEntry> => {
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const file = formData.get('file') as File;
-    if (!file) return NextResponse.json({ message: 'No file uploaded.' }, { status: 400 });
+    const file = formData.get("file") as File;
+    if (!file)
+      return NextResponse.json(
+        { message: "No file uploaded." },
+        { status: 400 }
+      );
 
     const buffer = await file.arrayBuffer();
-    const workbook = read(buffer, { type: 'buffer' });
+    const workbook = read(buffer, { type: "buffer" });
 
     // --- THE FIX ---
     // Instead of getting the first sheet, we get the sheet named "Sheet1".
@@ -60,18 +65,27 @@ export async function POST(req: NextRequest) {
     const sheet = workbook.Sheets[sheetName];
 
     if (!sheet) {
-        return NextResponse.json({ message: `A sheet named "${sheetName}" was not found in the uploaded file.` }, { status: 400 });
+      return NextResponse.json(
+        {
+          message: `A sheet named "${sheetName}" was not found in the uploaded file.`,
+        },
+        { status: 400 }
+      );
     }
 
     // Since the header is on row 1, we can use the default behavior.
     const rawData: GRNEntry[] = utils.sheet_to_json(sheet, {
-        raw: false,
-        dateNF: 'dd-mm-yyyy'
+      raw: false,
+      dateNF: "dd-mm-yyyy",
     });
 
     const itemMasterData = processData(rawData);
     const operations = Object.values(itemMasterData).map((item) => ({
-      updateOne: { filter: { 'Item Code': item['Item Code'] }, update: { $set: item }, upsert: true },
+      updateOne: {
+        filter: { "Item Code": item["Item Code"] },
+        update: { $set: item },
+        upsert: true,
+      },
     }));
 
     if (operations.length > 0) {
@@ -81,12 +95,18 @@ export async function POST(req: NextRequest) {
       await collection.bulkWrite(operations);
     }
 
-    return NextResponse.json({
-      message: `File processed successfully. ${operations.length} records updated/inserted.`,
-    }, { status: 200 });
-
+    return NextResponse.json(
+      {
+        message: `File processed successfully. ${operations.length} records updated/inserted.`,
+        recordCount: operations.length,
+      },
+      { status: 200 }
+    );
   } catch (error) {
-    console.error('[DEBUG] An error occurred in the upload handler:', error);
-    return NextResponse.json({ message: 'An error occurred while processing the file.' }, { status: 500 });
+    console.error("[DEBUG] An error occurred in the upload handler:", error);
+    return NextResponse.json(
+      { message: "An error occurred while processing the file." },
+      { status: 500 }
+    );
   }
 }

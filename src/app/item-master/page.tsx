@@ -1,10 +1,21 @@
-// src/app/item-master/page.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { utils, writeFile } from "xlsx";
 import { ItemMasterEntry } from "@/types";
+import { Sidebar } from "@/components/sidebar";
+import { FileUpload } from "@/components/file-upload";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Search, Download, Upload, Database } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 // A simple debounce hook
 const useDebounce = (value: string, delay: number) => {
@@ -31,6 +42,15 @@ export default function ItemMasterPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
+
+  // Upload progress state
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [processedRecords, setProcessedRecords] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
 
   // Fetch data when page or search query changes
   const fetchData = useCallback(async (page: number, search: string) => {
@@ -131,140 +151,298 @@ export default function ItemMasterPage() {
     }
   };
 
+  const handleFileUpload = async (file: File) => {
+    setUploadProgress(0);
+    setProcessingProgress(0);
+    setProcessedRecords(0);
+    setTotalRecords(0);
+    setIsProcessing(false);
+    setUploadMessage("");
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      // First simulate upload progress
+      for (let i = 0; i <= 100; i += 5) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        setUploadProgress(i);
+      }
+
+      setIsProcessing(true);
+      setUploadMessage("File uploaded. Processing data...");
+
+      // Now make the actual API call
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const result = await res.json();
+        throw new Error(result.message || "Upload failed");
+      }
+
+      const result = await res.json();
+      const recordCount = result.recordCount || 100; // Fallback if not provided
+      setTotalRecords(recordCount);
+
+      // Simulate processing progress
+      for (let i = 0; i <= recordCount; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        setProcessedRecords(i);
+        setProcessingProgress(Math.floor((i / recordCount) * 100));
+      }
+
+      setUploadMessage(result.message || "Upload completed successfully");
+
+      // Refresh data after successful upload
+      fetchData(currentPage, debouncedSearchQuery);
+
+      // Close dialog after a delay
+      setTimeout(() => {
+        setIsDialogOpen(false);
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || "Upload failed");
+      setUploadMessage("Upload failed. Please try again.");
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-screen-xl mx-auto">
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-            <h1 className="text-3xl font-bold text-gray-800">
-              Item Master ({totalItems})
-            </h1>
-            <div className="w-full sm:w-1/3">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by Item Name or Code..."
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+    <div className="min-h-screen bg-background">
+      <Sidebar />
+
+      <div className="lg:pl-64">
+        <div className="p-4 sm:p-6 lg:p-8">
+          <div className="max-w-screen-xl mx-auto">
+            {/* Header */}
+            <div className="bg-card rounded-lg border border-border shadow-sm p-6 mb-6">
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h1 className="text-3xl font-bold">
+                  Item Master{" "}
+                  <span className="text-muted-foreground">({totalItems})</span>
+                </h1>
+
+                {/* Search */}
+                <div className="w-full sm:w-1/3 relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search by Item Name or Code..."
+                    className="w-full pl-10 pr-4 py-2 border border-input rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  />
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex items-center space-x-3">
+                  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Upload className="mr-2 h-4 w-4" />
+                        Upload GRN
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Upload GRN File</DialogTitle>
+                        <DialogDescription>
+                          Upload an Excel file (.xlsx, .xls) containing GRN data
+                          to update the item master.
+                        </DialogDescription>
+                      </DialogHeader>
+
+                      <div className="py-4">
+                        {isProcessing ? (
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-sm">
+                                <span>Processing records</span>
+                                <span>
+                                  {processedRecords}/{totalRecords}
+                                </span>
+                              </div>
+                              <Progress value={processingProgress} />
+                            </div>
+                            <p className="text-sm text-center text-muted-foreground">
+                              {uploadMessage}
+                            </p>
+                          </div>
+                        ) : (
+                          <FileUpload
+                            onUpload={handleFileUpload}
+                            accept=".xlsx, .xls"
+                          />
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Button
+                    variant="outline"
+                    onClick={downloadExcel}
+                    disabled={totalItems === 0 || loading}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download
+                  </Button>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <Link
-                href="/"
-                className="bg-gray-600 text-white py-2 px-4 rounded-md hover:bg-gray-700 transition-colors"
-              >
-                &larr; Dashboard
-              </Link>
-              <button
-                onClick={downloadExcel}
-                disabled={totalItems === 0 || loading}
-                className="bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 disabled:bg-gray-400 transition-colors"
-              >
-                Download XLS
-              </button>
-            </div>
+
+            {error && (
+              <div className="mb-6 p-4 border border-destructive/50 bg-destructive/10 rounded-md text-destructive">
+                {error}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!loading && items.length === 0 && (
+              <div className="bg-card rounded-lg border border-border shadow-sm p-12 text-center">
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-primary/10">
+                  <Database className="h-10 w-10 text-primary" />
+                </div>
+                <h2 className="mt-6 text-xl font-semibold">No items found</h2>
+                <p className="mt-2 text-muted-foreground">
+                  {searchQuery
+                    ? "Try a different search term or"
+                    : "Get started by uploading your first GRN file."}
+                </p>
+                <div className="mt-6">
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Upload className="mr-2 h-4 w-4" />
+                        Upload GRN File
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Upload GRN File</DialogTitle>
+                        <DialogDescription>
+                          Upload an Excel file (.xlsx, .xls) containing GRN data
+                          to update the item master.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="py-4">
+                        <FileUpload
+                          onUpload={handleFileUpload}
+                          accept=".xlsx, .xls"
+                        />
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </div>
+            )}
+
+            {/* Table */}
+            {items.length > 0 && (
+              <div className="overflow-x-auto bg-card rounded-lg border border-border shadow-sm">
+                <table className="min-w-full divide-y divide-border">
+                  <thead>
+                    <tr>
+                      {[
+                        "Item Code",
+                        "Item Name",
+                        "Vendor",
+                        "Manufacturer",
+                        "MRP",
+                        "Item Cost",
+                        "Unit Rate",
+                        "Latest GRN Date",
+                      ].map((header) => (
+                        <th
+                          key={header}
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider"
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {loading ? (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className="text-center py-10 text-muted-foreground"
+                        >
+                          Loading...
+                        </td>
+                      </tr>
+                    ) : (
+                      items.map((item) => (
+                        <tr
+                          key={item["Item Code"]}
+                          className="hover:bg-muted/50 transition-colors"
+                        >
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            {item["Item Code"]}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            {item["Item Name"]}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                            {item["Vendor"]}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                            {item["Manufacturer"]}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            {item["MRP"]}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            {item["Item Cost"]}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            {item["Unit Rate"]}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                            {new Date(item["GRN Date"]).toLocaleDateString(
+                              "en-GB"
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Pagination */}
+            {items.length > 0 && (
+              <div className="flex justify-between items-center mt-4 px-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+                  disabled={currentPage === 1 || loading}
+                  size="sm"
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Page {currentPage} of {totalPages || 1}
+                </span>
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(p + 1, totalPages))
+                  }
+                  disabled={
+                    currentPage === totalPages || loading || totalPages === 0
+                  }
+                  size="sm"
+                >
+                  Next
+                </Button>
+              </div>
+            )}
           </div>
-        </div>
-
-        {error && (
-          <p className="text-center text-red-500 bg-red-50 p-4 rounded-md">
-            Error: {error}
-          </p>
-        )}
-
-        <div className="overflow-x-auto bg-white rounded-lg shadow-md">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                {[
-                  "Item Code",
-                  "Item Name",
-                  "Vendor",
-                  "Manufacturer",
-                  "MRP",
-                  "Item Cost",
-                  "Unit Rate",
-                  "Latest GRN Date",
-                ].map((header) => (
-                  <th
-                    key={header}
-                    scope="col"
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    {header}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="text-center py-10 text-gray-500">
-                    Loading...
-                  </td>
-                </tr>
-              ) : items.length > 0 ? (
-                items.map((item) => (
-                  <tr
-                    key={item["Item Code"]}
-                    className="hover:bg-gray-50 transition-colors"
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {item["Item Code"]}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                      {item["Item Name"]}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {item["Vendor"]}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {item["Manufacturer"]}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {item["MRP"]}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {item["Item Cost"]}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {item["Unit Rate"]}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(item["GRN Date"]).toLocaleDateString("en-GB")}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={8} className="text-center py-10 text-gray-500">
-                    No items found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination Controls */}
-        <div className="flex justify-between items-center mt-4 px-2">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-            disabled={currentPage === 1 || loading}
-            className="px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
-          >
-            Previous
-          </button>
-          <span className="text-sm text-gray-700">
-            Page {currentPage} of {totalPages || 1}
-          </span>
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-            disabled={currentPage === totalPages || loading || totalPages === 0}
-            className="px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
-          >
-            Next
-          </button>
         </div>
       </div>
     </div>
