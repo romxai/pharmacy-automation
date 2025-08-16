@@ -1,13 +1,14 @@
+// src/app/api/stock-analysis/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import clientPromise from "@/lib/mongodb";
 import { Collection, ObjectId } from "mongodb";
 import * as XLSX from "xlsx";
-import { IItem, IDepartment, IStock, ItemMasterEntry } from "@/types";
+import { IStock, ItemMasterEntry } from "@/types";
 import { parseStockBalanceSheet } from "@/lib/parsers/stockBalanceParser";
 import { parseSalesReport } from "@/lib/parsers/salesReportParser";
 import { parseStockTransferSheet } from "@/lib/parsers/stockTransferParser";
 
-// This interface defines the structure for our in-memory data processing
 interface StockCalculationData {
   itemName: string;
   initialStock: number;
@@ -17,173 +18,276 @@ interface StockCalculationData {
   itemType: string;
 }
 
+const processDepartmentFiles = async (
+  departmentName: string,
+  stockBalanceFile: File,
+  salesReportFile: File,
+  itemMaster: ItemMasterEntry[]
+) => {
+  const stockBalanceBuffer = await stockBalanceFile.arrayBuffer();
+  const stockWb = XLSX.read(stockBalanceBuffer);
+  const { asOfDate, aggregatedData: stockMap } = parseStockBalanceSheet(
+    stockWb,
+    departmentName
+  );
+
+  const salesBuffer = await salesReportFile.arrayBuffer();
+  const salesWb = XLSX.read(salesBuffer);
+  const salesMap = parseSalesReport(salesWb, departmentName, asOfDate);
+
+  const calculationMap = new Map<string, StockCalculationData>();
+  for (const masterItem of itemMaster) {
+    const itemCode = String(masterItem["Item Code"]).trim();
+    if (itemCode) {
+      calculationMap.set(itemCode, {
+        itemName: masterItem["Item Name"],
+        initialStock: 0,
+        sold: 0,
+        transferred: 0,
+        manufacturer: masterItem.Manufacturer || "N/A",
+        itemType: "N/A",
+      });
+    }
+  }
+
+  for (const [itemCode, stockDetails] of stockMap.entries()) {
+    if (calculationMap.has(itemCode)) {
+      const entry = calculationMap.get(itemCode)!;
+      entry.initialStock = stockDetails.totalQty;
+      entry.itemType = stockDetails.category;
+    }
+  }
+
+  for (const [itemCode, soldQty] of salesMap.entries()) {
+    if (calculationMap.has(itemCode)) {
+      calculationMap.get(itemCode)!.sold = soldQty;
+    }
+  }
+
+  return { calculationMap, asOfDate };
+};
+
 export async function POST(req: NextRequest) {
   console.log("\n--- [API] Starting Stock Analysis Orchestration ---");
   try {
     const formData = await req.formData();
-    const departmentName = formData.get("department") as string;
-    const stockBalanceFile = formData.get("stock_balance_file") as File;
-    const salesReportFile = formData.get("sales_report_file") as File;
-    const stockTransferFile = formData.get("stock_transfer_file") as File;
+    const updateType = formData.get("updateType") as string;
 
-    if (
-      !departmentName ||
-      !stockBalanceFile ||
-      !salesReportFile ||
-      !stockTransferFile
-    ) {
-      throw new Error("Missing required files or department name.");
-    }
-    console.log(`[API] Department selected: ${departmentName}`);
-
-    // --- Step 1: Connect to DB and Fetch the Master Item List ---
-    console.log(
-      "\n[API] 1. Fetching master list from 'itemMaster' collection..."
-    );
     const client = await clientPromise;
     const db = client.db("pharmacy");
     const itemMasterCollection: Collection<ItemMasterEntry> =
       db.collection("itemMaster");
-
     const allMasterItems = await itemMasterCollection.find({}).toArray();
     if (allMasterItems.length === 0) {
-      throw new Error(
-        "The 'itemMaster' collection is empty. Please process a GRN sheet first."
-      );
+      throw new Error("The 'itemMaster' collection is empty.");
     }
-    console.log(
-      `[API]  => Found ${allMasterItems.length} total items in the master list.`
-    );
-
-    // --- Step 2: Parse all uploaded files to get transactional data ---
-    const stockBalanceBuffer = await stockBalanceFile.arrayBuffer();
-    const stockWb = XLSX.read(stockBalanceBuffer);
-    const { asOfDate, aggregatedData: stockMap } = parseStockBalanceSheet(
-      stockWb,
-      departmentName
-    );
-
-    const salesBuffer = await salesReportFile.arrayBuffer();
-    const salesWb = XLSX.read(salesBuffer);
-    const salesMap = parseSalesReport(salesWb, departmentName, asOfDate);
-
-    const transferBuffer = await stockTransferFile.arrayBuffer();
-    const transferWb = XLSX.read(transferBuffer);
-    const transferMap = parseStockTransferSheet(transferWb, departmentName);
-
-    // --- Step 3: Build a Comprehensive Calculation Map from the Master List ---
-    console.log("\n[API] 2. Building comprehensive calculation map...");
-    const calculationMap = new Map<string, StockCalculationData>();
-
-    for (const masterItem of allMasterItems) {
-      const itemCode = String(masterItem["Item Code"]).trim();
-      if (itemCode) {
-        calculationMap.set(itemCode, {
-          itemName: masterItem["Item Name"],
-          initialStock: 0,
-          sold: 0,
-          transferred: 0,
-          manufacturer: masterItem.Manufacturer || "N/A",
-          itemType: "N/A",
-        });
-      }
-    }
-    console.log(
-      `[API]  => Initialized calculation map with ${calculationMap.size} items from the master list.`
-    );
-
-    // --- Step 4: Populate the Calculation Map with data from parsed files ---
-    console.log("\n[API] 3. Populating map with parsed file data...");
-
-    for (const [itemCode, stockDetails] of stockMap.entries()) {
-      if (calculationMap.has(itemCode)) {
-        const entry = calculationMap.get(itemCode)!;
-        entry.initialStock = stockDetails.totalQty;
-        entry.itemType = stockDetails.category;
-      } else {
-        console.warn(
-          `[API]   [BALANCE] WARNING: Item code ${itemCode} from stock balance not in master list. Skipping.`
-        );
-      }
-    }
-    console.log(`[API]  => Populated with initial stock data.`);
-
-    for (const [itemCode, soldQty] of salesMap.entries()) {
-      if (calculationMap.has(itemCode)) {
-        calculationMap.get(itemCode)!.sold = soldQty;
-      } else {
-        console.warn(
-          `[API]   [SALES] WARNING: Item code ${itemCode} from sales report not in master list. Skipping.`
-        );
-      }
-    }
-    console.log(`[API]  => Populated with sales data.`);
-
-    for (const [itemCode, transferredQty] of transferMap.entries()) {
-      if (calculationMap.has(itemCode)) {
-        calculationMap.get(itemCode)!.transferred = transferredQty;
-      } else {
-        console.warn(
-          `[API]   [TRANSFER] WARNING: Item code ${itemCode} from transfer report not in master list. Skipping.`
-        );
-      }
-    }
-    console.log(`[API]  => Populated with transfer data.`);
-
-    // --- Step 5: Final Database Transaction ---
-    console.log("\n[API] 4. Saving final results to database...");
-    const departmentsCollection: Collection<IDepartment> =
-      db.collection("departments");
     const stockCollection: Collection<IStock> = db.collection("stock");
+    const departmentsCollection = db.collection("departments");
 
-    const departmentObj = await departmentsCollection.findOneAndUpdate(
-      { name: departmentName },
-      { $set: { name: departmentName } },
-      { upsert: true, returnDocument: "after" }
-    );
-    if (!departmentObj) throw new Error("Could not create or find department.");
+    if (updateType === "single") {
+      const departmentName = formData.get("department") as string;
+      const stockBalanceFile = formData.get("stock_balance_file") as File;
+      const salesReportFile = formData.get("sales_report_file") as File;
 
-    const deleteResult = await stockCollection.deleteMany({
-      departmentId: departmentObj._id,
-      as_of_date: asOfDate,
-    });
-    console.log(
-      `[API]  => Deleted ${deleteResult.deletedCount} old stock records for this date.`
-    );
-
-    const stockRecordsToInsert: IStock[] = [];
-    for (const [itemCode, calcData] of calculationMap.entries()) {
-      const masterItem = allMasterItems.find(
-        (item) => String(item["Item Code"]).trim() === itemCode
+      const { calculationMap, asOfDate } = await processDepartmentFiles(
+        departmentName,
+        stockBalanceFile,
+        salesReportFile,
+        allMasterItems
       );
-      if (!masterItem) continue;
+      // In single update, transfer is not recalculated, but read from the transfer sheet.
+      const stockTransferFile = formData.get("stock_transfer_file") as File;
+      if (stockTransferFile) {
+        const transferBuffer = await stockTransferFile.arrayBuffer();
+        const transferWb = XLSX.read(transferBuffer);
+        const transferMap = parseStockTransferSheet(transferWb, departmentName);
 
-      const stockUsed = calcData.sold + calcData.transferred;
-      stockRecordsToInsert.push({
-        // @ts-ignore
-        itemId: new ObjectId(masterItem._id),
+        for (const [itemCode, transferredQty] of transferMap.entries()) {
+          if (calculationMap.has(itemCode)) {
+            calculationMap.get(itemCode)!.transferred = transferredQty;
+          }
+        }
+      }
+
+      // DB Operations
+      const departmentObj = await departmentsCollection.findOneAndUpdate(
+        { name: departmentName },
+        { $set: { name: departmentName, lastUpdated: new Date() } },
+        { upsert: true, returnDocument: "after" }
+      );
+      if (!departmentObj)
+        throw new Error("Could not find or create department.");
+
+      await stockCollection.deleteMany({
         departmentId: departmentObj._id,
-        initial_stock: calcData.initialStock,
-        stock_sold: calcData.sold,
-        stock_transferred: calcData.transferred,
-        stock_used: stockUsed,
-        stock_left: calcData.initialStock - stockUsed,
         as_of_date: asOfDate,
       });
+
+      const stockRecordsToInsert: IStock[] = [];
+      for (const [itemCode, calcData] of calculationMap.entries()) {
+        const masterItem = allMasterItems.find(
+          (item) => String(item["Item Code"]).trim() === itemCode
+        );
+        if (!masterItem) continue;
+
+        const stockUsed = calcData.sold + calcData.transferred;
+        stockRecordsToInsert.push({
+          // @ts-ignore
+          itemId: new ObjectId(masterItem._id),
+          departmentId: departmentObj._id,
+          initial_stock: calcData.initialStock,
+          stock_sold: calcData.sold,
+          stock_transferred: calcData.transferred,
+          stock_used: stockUsed,
+          stock_left: calcData.initialStock - stockUsed,
+          as_of_date: asOfDate,
+        });
+      }
+
+      if (stockRecordsToInsert.length > 0) {
+        await stockCollection.insertMany(stockRecordsToInsert);
+      }
+      return NextResponse.json({
+        message: `Successfully processed for ${departmentName}.`,
+      });
+    } else if (updateType === "full" || updateType === "transfer") {
+      const stockTransferFile = formData.get("stock_transfer_file") as File;
+      if (!stockTransferFile) throw new Error("Transfer sheet is required.");
+
+      const transferBuffer = await stockTransferFile.arrayBuffer();
+      const transferWb = XLSX.read(transferBuffer);
+      const departments = ["IP", "OP", "OT"];
+      let unifiedAsOfDate: Date | null = null;
+
+      if (updateType === "full") {
+        for (const dept of departments) {
+          const stockBalanceFile = formData.get(
+            `${dept.toLowerCase()}_stock_balance_file`
+          ) as File;
+          const salesReportFile = formData.get(
+            `${dept.toLowerCase()}_sales_report_file`
+          ) as File;
+          if (!stockBalanceFile || !salesReportFile)
+            throw new Error(`Missing files for ${dept}`);
+
+          const { calculationMap, asOfDate } = await processDepartmentFiles(
+            dept,
+            stockBalanceFile,
+            salesReportFile,
+            allMasterItems
+          );
+          if (!unifiedAsOfDate) unifiedAsOfDate = asOfDate;
+
+          const transferMap = parseStockTransferSheet(transferWb, dept);
+          for (const [itemCode, transferredQty] of transferMap.entries()) {
+            if (calculationMap.has(itemCode)) {
+              calculationMap.get(itemCode)!.transferred = transferredQty;
+            }
+          }
+
+          // DB Operations for each department
+          const departmentObj = await departmentsCollection.findOneAndUpdate(
+            { name: dept },
+            { $set: { name: dept, lastUpdated: new Date() } },
+            { upsert: true, returnDocument: "after" }
+          );
+          if (!departmentObj)
+            throw new Error("Could not find or create department.");
+
+          await stockCollection.deleteMany({
+            departmentId: departmentObj._id,
+            as_of_date: asOfDate,
+          });
+
+          const stockRecordsToInsert: IStock[] = [];
+          for (const [itemCode, calcData] of calculationMap.entries()) {
+            const masterItem = allMasterItems.find(
+              (item) => String(item["Item Code"]).trim() === itemCode
+            );
+            if (!masterItem) continue;
+
+            const stockUsed = calcData.sold + calcData.transferred;
+            stockRecordsToInsert.push({
+              // @ts-ignore
+              itemId: new ObjectId(masterItem._id),
+              departmentId: departmentObj._id,
+              initial_stock: calcData.initialStock,
+              stock_sold: calcData.sold,
+              stock_transferred: calcData.transferred,
+              stock_used: stockUsed,
+              stock_left: calcData.initialStock - stockUsed,
+              as_of_date: asOfDate,
+            });
+          }
+          if (stockRecordsToInsert.length > 0) {
+            await stockCollection.insertMany(stockRecordsToInsert);
+          }
+        }
+      } else {
+        // This handles updateType === 'transfer'
+        const latestStockEntry = await stockCollection.findOne(
+          {},
+          { sort: { as_of_date: -1 } }
+        );
+        if (!latestStockEntry) {
+          throw new Error(
+            "No existing stock records found to update. Please do a full update first."
+          );
+        }
+        unifiedAsOfDate = latestStockEntry.as_of_date;
+        console.log(
+          `[API] Found latest stock date for transfer update: ${unifiedAsOfDate}`
+        );
+
+        for (const dept of departments) {
+          const transferMap = parseStockTransferSheet(transferWb, dept);
+          const departmentObj = await departmentsCollection.findOne({
+            name: dept,
+          });
+          if (!departmentObj) continue;
+
+          for (const [itemCode, newTransferredQty] of transferMap.entries()) {
+            const masterItem = allMasterItems.find(
+              (item) => String(item["Item Code"]).trim() === itemCode
+            );
+            if (!masterItem) continue;
+
+            const existingRecord = await stockCollection.findOne({
+              itemId: new ObjectId(masterItem._id),
+              departmentId: departmentObj._id,
+              as_of_date: unifiedAsOfDate,
+            });
+
+            if (existingRecord) {
+              const oldTransferredQty = existingRecord.stock_transferred || 0;
+              const newStockUsed =
+                (existingRecord.stock_sold || 0) + newTransferredQty;
+              const newStockLeft =
+                (existingRecord.initial_stock || 0) - newStockUsed;
+
+              await stockCollection.updateOne(
+                { _id: existingRecord._id },
+                {
+                  $set: {
+                    stock_transferred: newTransferredQty,
+                    stock_used: newStockUsed,
+                    stock_left: newStockLeft,
+                  },
+                }
+              );
+            }
+          }
+          await departmentsCollection.updateOne(
+            { _id: departmentObj._id },
+            { $set: { lastUpdated: new Date() } }
+          );
+        }
+      }
+
+      return NextResponse.json({ message: "Update completed successfully." });
     }
 
-    if (stockRecordsToInsert.length > 0) {
-      await stockCollection.insertMany(stockRecordsToInsert);
-    }
-    console.log(
-      `[API]  => Inserted ${stockRecordsToInsert.length} new stock records.`
-    );
-    console.log("--- [API] Stock Analysis Process Completed Successfully ---");
-
-    return NextResponse.json({
-      message: `Successfully processed and saved ${stockRecordsToInsert.length} stock records for ${departmentName}.`,
-      asOfDate: asOfDate.toISOString().split("T")[0],
-    });
+    throw new Error("Invalid update type.");
   } catch (error: any) {
     console.error("--- [API] Stock analysis failed ---");
     console.error(error);
@@ -193,64 +297,105 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-// GET Handler remains the same
+
 export async function GET(req: NextRequest) {
   try {
     const client = await clientPromise;
     const db = client.db("pharmacy");
-    const stockCollection: Collection<IStock> = db.collection("stock");
     const { searchParams } = new URL(req.url);
     const departmentName = searchParams.get("department");
-    const dateStr = searchParams.get("date");
+    const page = parseInt(searchParams.get("page") || "1");
+    const limit = parseInt(searchParams.get("limit") || "10");
+    const skip = (page - 1) * limit;
 
-    if (!departmentName || !dateStr) {
-      return NextResponse.json(
-        { message: "Department and date are required." },
-        { status: 400 }
+    const pipeline: any[] = [];
+
+    if (departmentName && departmentName !== "All Departments") {
+      const departmentObj = await db
+        .collection("departments")
+        .findOne({ name: departmentName });
+      if (!departmentObj)
+        return NextResponse.json({
+          results: [],
+          totalPages: 0,
+          lastUpdated: null,
+        });
+      pipeline.push({
+        $match: { departmentId: new ObjectId(departmentObj._id) },
+      });
+    }
+
+    if (departmentName === "All Departments") {
+      pipeline.push(
+        {
+          $group: {
+            _id: "$itemId",
+            initial_stock: { $sum: "$initial_stock" },
+            stock_sold: { $sum: "$stock_sold" },
+            stock_transferred: { $sum: "$stock_transferred" },
+            stock_used: { $sum: "$stock_used" },
+            stock_left: { $sum: "$stock_left" },
+          },
+        },
+        { $addFields: { itemId: "$_id" } }
       );
     }
-    const departmentObj = await db
-      .collection("departments")
-      .findOne({ name: departmentName });
-    if (!departmentObj) {
-      return NextResponse.json([], { status: 200 });
-    }
-    const asOfDate = new Date(`${dateStr}T12:00:00.000Z`);
-    const results = await stockCollection
-      .aggregate([
-        {
-          $match: {
-            departmentId: new ObjectId(departmentObj._id),
-            as_of_date: asOfDate,
+
+    pipeline.push(
+      {
+        $lookup: {
+          from: "itemMaster",
+          localField: "itemId",
+          foreignField: "_id",
+          as: "itemDetails",
+        },
+      },
+      { $unwind: "$itemDetails" },
+      {
+        $project: {
+          _id: 1,
+          initial_stock: 1,
+          stock_sold: 1,
+          stock_transferred: 1,
+          stock_used: 1,
+          stock_left: 1,
+          item: {
+            itemCode: "$itemDetails.Item Code",
+            itemName: "$itemDetails.Item Name",
           },
         },
-        {
-          $lookup: {
-            from: "itemMaster",
-            localField: "itemId",
-            foreignField: "_id",
-            as: "itemDetails",
-          },
-        },
-        { $unwind: "$itemDetails" },
-        {
-          $project: {
-            _id: 1,
-            initial_stock: 1,
-            stock_sold: 1,
-            stock_transferred: 1,
-            stock_used: 1,
-            stock_left: 1,
-            item: {
-              itemCode: "$itemDetails.Item Code",
-              itemName: "$itemDetails.Item Name",
-            },
-          },
-        },
-        { $sort: { "item.itemName": 1 } },
-      ])
+      },
+      { $sort: { "item.itemName": 1 } }
+    );
+
+    const stockCollection = db.collection("stock");
+    const countPipeline = [...pipeline, { $count: "total" }];
+    const totalResults = await stockCollection
+      .aggregate(countPipeline)
       .toArray();
-    return NextResponse.json(results, { status: 200 });
+    const totalPages = Math.ceil((totalResults[0]?.total || 0) / limit);
+
+    const results = await stockCollection
+      .aggregate([...pipeline, { $skip: skip }, { $limit: limit }])
+      .toArray();
+
+    let lastUpdated = null;
+    if (departmentName !== "All Departments") {
+      const dept = await db
+        .collection("departments")
+        .findOne({ name: departmentName });
+      lastUpdated = dept?.lastUpdated || null;
+    } else {
+      const latestDept = await db
+        .collection("departments")
+        .find()
+        .sort({ lastUpdated: -1 })
+        .limit(1)
+        .toArray();
+      lastUpdated = latestDept[0]?.lastUpdated || null;
+    }
+
+    return NextResponse.json({ results, totalPages, lastUpdated });
   } catch (error: any) {
     console.error("--- [API] GET stock analysis failed ---");
     console.error(error);

@@ -34,7 +34,11 @@ export function parseStockBalanceSheet(
   console.log(
     `[Parser-StockBalance] Reading location from cell F5: "${locationRaw}"`
   );
-  const deptMatch = locationRaw.match(/SRST-([A-Z]+) PHARMACY/i);
+
+  // --- VVV THIS IS THE UPDATED REGEX VVV ---
+  const deptMatch = locationRaw.match(/(?:SRST-|SRDPS-)?([A-Z]+) PHARMACY/i);
+  // --- ^^^ THIS IS THE UPDATED REGEX ^^^ ---
+
   const actualDept = deptMatch ? deptMatch[1] : "";
   console.log(
     `[Parser-StockBalance]  => Extracted department: "${actualDept}"`
@@ -45,15 +49,13 @@ export function parseStockBalanceSheet(
     );
   }
 
-  // **THE FIX: Use header: 1 to auto-detect headers, and defval for empty cells**
   const jsonData = XLSX.utils.sheet_to_json(sheet, {
     header: 1,
     defval: "",
   }) as any[];
-  // Find header row index (row 4 as per user, which is index 3)
   const headerRowIndex = 3;
   const headers = jsonData[headerRowIndex];
-  const dataRows = jsonData.slice(headerRowIndex + 2); // Data starts 2 rows after header
+  const dataRows = jsonData.slice(headerRowIndex + 2);
 
   const aggregatedData = new Map<string, AggregatedStockItem>();
   console.log(

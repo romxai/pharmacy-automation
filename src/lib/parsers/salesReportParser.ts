@@ -15,7 +15,11 @@ export function parseSalesReport(
   const deptCell = sheet["A3"];
   const deptRaw = deptCell?.w || deptCell?.v?.toString() || "";
   console.log(`[Parser-Sales] Reading department from cell A3: "${deptRaw}"`);
-  const deptMatch = deptRaw.match(/\( SRST-([A-Z]+) PHARMACY \)/i);
+
+  // --- VVV THIS IS THE UPDATED REGEX VVV ---
+  const deptMatch = deptRaw.match(/(?:SRST-|SRDPS-)?(IP|OP|OT)\s*PHARMACY/i);
+  // --- ^^^ THIS IS THE UPDATED REGEX ^^^ ---
+
   const actualDept = deptMatch ? deptMatch[1] : "";
   if (actualDept.toUpperCase() !== expectedDept.toUpperCase()) {
     throw new Error(
@@ -42,10 +46,8 @@ export function parseSalesReport(
     header: 1,
     defval: "",
   }) as any[];
-  // Header is on row 5 (index 4)
   const headerRowIndex = 4;
   const headers = jsonData[headerRowIndex];
-  // **THE FIX: Data starts on row 6, which is immediately after the header row.**
   const dataRows = jsonData.slice(headerRowIndex + 1);
 
   const salesMap = new Map<string, number>();
@@ -62,7 +64,6 @@ export function parseSalesReport(
       }
     });
 
-    // Use trimmed header name to access the properties
     const itemCode = row["Item code"];
     const qty = parseFloat(row["Sales Qty"]);
 
