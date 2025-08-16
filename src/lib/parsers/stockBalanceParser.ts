@@ -13,16 +13,18 @@ export function parseStockBalanceSheet(
   expectedDept: string
 ) {
   console.log("\n[Parser] 1. Parsing Stock Balance Sheet...");
-  const sheet = workbook.Sheets["stockbalance"];
-  if (!sheet) throw new Error("Sheet named 'stockbalance' not found.");
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!sheet) throw new Error("No sheets found in the Stock Balance workbook.");
 
   const dateCell = sheet["B3"];
   const dateRaw = dateCell?.w || dateCell?.v?.toString() || "";
   console.log(`[Parser-StockBalance] Reading date from cell B3: "${dateRaw}"`);
-  const dateMatch = dateRaw.match(/(\d{2}-\d{2}-\d{4})/);
+  const dateMatch = dateRaw.match(/From Date : (\d{2}-\d{2}-\d{4})/);
   if (!dateMatch)
-    throw new Error("Could not find a valid date (dd-mm-yyyy) in cell B3.");
-  const asOfDate = parseDate(dateMatch[0]);
+    throw new Error(
+      "Could not find a valid start date (dd-mm-yyyy) in cell B3."
+    );
+  const asOfDate = parseDate(dateMatch[1]);
   console.log(
     `[Parser-StockBalance]  => Parsed 'asOfDate': ${asOfDate.toISOString()}`
   );
@@ -43,17 +45,31 @@ export function parseStockBalanceSheet(
     );
   }
 
-  const jsonData = XLSX.utils.sheet_to_json(sheet, { range: 3 }) as any[];
+  // **THE FIX: Use header: 1 to auto-detect headers, and defval for empty cells**
+  const jsonData = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: "",
+  }) as any[];
+  // Find header row index (row 4 as per user, which is index 3)
+  const headerRowIndex = 3;
+  const headers = jsonData[headerRowIndex];
+  const dataRows = jsonData.slice(headerRowIndex + 2); // Data starts 2 rows after header
+
   const aggregatedData = new Map<string, AggregatedStockItem>();
   console.log(
-    `[Parser-StockBalance]  => Found ${jsonData.length} total entries. Aggregating by Item Code...`
+    `[Parser-StockBalance]  => Found ${dataRows.length} total entries. Aggregating by Item Code...`
   );
 
-  for (const row of jsonData) {
+  for (const rowArray of dataRows) {
+    const row: any = {};
+    headers.forEach((header: string, index: number) => {
+      row[header] = rowArray[index];
+    });
+
     const itemCode = row["Item Code"];
-    const qty = row["Qty"];
-    if (itemCode && typeof qty === "number") {
-      // **THE FIX: Standardize the key**
+    const qty = parseFloat(row["Qty"]);
+
+    if (itemCode && !isNaN(qty)) {
       const sItemCode = String(itemCode).trim();
       if (!sItemCode) continue;
 
