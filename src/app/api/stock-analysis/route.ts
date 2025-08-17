@@ -310,6 +310,16 @@ export async function GET(req: NextRequest) {
 
     const pipeline: any[] = [];
 
+    const activityFilter = {
+      $match: {
+        $or: [
+          { initial_stock: { $ne: 0 } },
+          { stock_sold: { $ne: 0 } },
+          { stock_transferred: { $ne: 0 } },
+        ],
+      },
+    };
+
     if (departmentName && departmentName !== "All Departments") {
       const departmentObj = await db
         .collection("departments")
@@ -323,6 +333,7 @@ export async function GET(req: NextRequest) {
       pipeline.push({
         $match: { departmentId: new ObjectId(departmentObj._id) },
       });
+      pipeline.push(activityFilter);
     }
 
     if (departmentName === "All Departments") {
@@ -339,6 +350,7 @@ export async function GET(req: NextRequest) {
         },
         { $addFields: { itemId: "$_id" } }
       );
+      pipeline.push(activityFilter);
     }
 
     pipeline.push(
