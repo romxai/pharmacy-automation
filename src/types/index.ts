@@ -29,8 +29,6 @@ export interface ItemMasterEntry extends Omit<GRNEntry, "GRN Date"> {
   "GRN Date": string;
 }
 
-// --- VVV ADD THE NEW INTERFACES BELOW VVV ---
-
 /**
  * Interface for the Item Master collection.
  */
@@ -67,4 +65,28 @@ export interface IStock {
   stock_used: number;
   stock_left: number;
   as_of_date: Date;
+}
+
+// --- VVV ADD THE NEW INTERFACES BELOW VVV ---
+
+/**
+ * Interface representing a single item in a saved reorder analysis.
+ */
+export interface IReorderAnalysisItem {
+  itemId: any; // ObjectId of the item
+  itemCode: string;
+  itemName: string;
+  stock_left: number;
+  stock_used: number;
+  reorder_quantity: number;
+}
+
+/**
+ * Interface for a saved reorder analysis document.
+ */
+export interface ISavedReorderAnalysis {
+  _id?: any; // ObjectId from MongoDB
+  createdAt: Date;
+  surplusPercentage: number;
+  items: IReorderAnalysisItem[];
 }

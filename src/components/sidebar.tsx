@@ -15,6 +15,7 @@ import {
   LogOut,
   Menu,
   X,
+  ClipboardList, // New Icon
 } from "lucide-react";
 
 const navItems = [
@@ -28,27 +29,16 @@ const navItems = [
     href: "/item-master",
     icon: Database,
   },
-  // --- VVV THIS IS THE NEW LINK VVV ---
   {
     name: "Stock Analysis",
     href: "/stock-analysis",
-    icon: FileSpreadsheet, // Re-using an existing, relevant icon
-  },
-  // --- ^^^ THIS IS THE NEW LINK ^^^ ---
-  {
-    name: "Stock Reports",
-    href: "/reports/stock",
     icon: FileSpreadsheet,
   },
+  // --- VVV THIS IS THE NEW LINK VVV ---
   {
-    name: "Sales Analytics",
-    href: "/reports/sales",
-    icon: BarChart3,
-  },
-  {
-    name: "Settings",
-    href: "/settings",
-    icon: Settings,
+    name: "Reorder Analysis",
+    href: "/reorder-analysis",
+    icon: ClipboardList,
   },
 ];
 

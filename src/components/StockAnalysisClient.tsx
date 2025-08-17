@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { UpdateModal } from "@/components/UpdateModal";
 import { format } from "date-fns";
+import { Button } from "./ui/button";
 
 interface StockResult {
   _id: string;
@@ -37,7 +38,7 @@ export default function StockAnalysisClient() {
     setIsLoading(true);
     try {
       const response = await fetch(
-        `/api/stock-analysis?department=${department}&page=${page}&limit=10`
+        `/api/stock-analysis?department=${department}&page=${page}&limit=30` // <--- UPDATED
       );
       if (!response.ok) {
         const data = await response.json();
@@ -96,12 +97,7 @@ export default function StockAnalysisClient() {
             </select>
           </div>
           <div className="text-right">
-            <button
-              onClick={handleUpdate}
-              className="inline-flex justify-center py-2.5 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-            >
-              Update
-            </button>
+            <Button onClick={handleUpdate}>Update</Button>
             {lastUpdated && (
               <p className="text-xs text-gray-500 mt-1">
                 Last updated: {format(new Date(lastUpdated), "PPpp")}
@@ -185,23 +181,21 @@ export default function StockAnalysisClient() {
             </table>
           </div>
           <div className="flex justify-between items-center p-4">
-            <button
+            <Button
               onClick={() => handlePageChange(currentPage - 1)}
               disabled={currentPage === 1}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
             >
               Previous
-            </button>
+            </Button>
             <span>
               Page {currentPage} of {totalPages}
             </span>
-            <button
+            <Button
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
