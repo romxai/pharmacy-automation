@@ -1,5 +1,4 @@
 // src/app/api/dashboard/route.ts
-
 import { NextRequest, NextResponse } from "next/server";
 import clientPromise from "@/lib/mongodb";
 import { Collection, ObjectId } from "mongodb";
@@ -9,31 +8,21 @@ export async function GET(req: NextRequest) {
     const client = await clientPromise;
     const db = client.db("pharmacy");
     const stockCollection = db.collection("stock");
-    const departmentsCollection = db.collection("departments");
-    const itemMasterCollection = db.collection("itemMaster");
 
-    // Get the most recent date from the stock records
-    const latestStockEntry = await stockCollection.findOne(
-      {},
-      { sort: { as_of_date: -1 } }
-    );
-    if (!latestStockEntry) {
-      return NextResponse.json({
-        kpis: {
-          totalStock: 0,
-          totalSold: 0,
-          lowStockCount: 0,
-        },
-        stockByDept: [],
-        topSoldItems: [],
-        topStockedItems: [],
-      });
-    }
-    const asOfDate = latestStockEntry.as_of_date;
+    const { searchParams } = new URL(req.url);
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
+
+    const dateFilter: any = {};
+    if (from) dateFilter.$gte = new Date(from);
+    if (to) dateFilter.$lte = new Date(to);
+
+    const matchFilter =
+      Object.keys(dateFilter).length > 0 ? { as_of_date: dateFilter } : {};
 
     // --- KPIs ---
     const kpiPipeline = [
-      { $match: { as_of_date: asOfDate } },
+      { $match: matchFilter },
       {
         $group: {
           _id: null,
@@ -44,8 +33,8 @@ export async function GET(req: NextRequest) {
     ];
     const kpiResult = await stockCollection.aggregate(kpiPipeline).toArray();
     const lowStockCount = await stockCollection.countDocuments({
-      as_of_date: asOfDate,
-      stock_left: { $lte: 10, $gt: 0 }, // Example: low stock is 10 or less
+      ...matchFilter,
+      stock_left: { $lte: 10, $gt: 0 },
     });
 
     const kpis = {
@@ -56,105 +45,117 @@ export async function GET(req: NextRequest) {
 
     // --- Stock by Department ---
     const stockByDeptPipeline = [
-      { $match: { as_of_date: asOfDate } },
+      { $match: matchFilter },
       {
-        $group: {
-          _id: "$departmentId",
-          totalStock: { $sum: "$stock_left" },
+        $lookup: {
+          from: "itemMaster",
+          localField: "itemId",
+          foreignField: "_id",
+          as: "itemDetails",
         },
       },
+      { $unwind: "$itemDetails" },
       {
         $lookup: {
           from: "departments",
-          localField: "_id",
+          localField: "departmentId",
           foreignField: "_id",
-          as: "departmentInfo",
+          as: "departmentDetails",
         },
       },
-      { $unwind: "$departmentInfo" },
+      { $unwind: "$departmentDetails" },
       {
-        $project: {
-          name: "$departmentInfo.name",
-          value: "$totalStock",
+        $group: {
+          _id: "$departmentDetails.name",
+          value: { $sum: "$stock_left" },
         },
       },
+      { $project: { name: "$_id", value: 1, _id: 0 } },
     ];
     const stockByDept = await stockCollection
       .aggregate(stockByDeptPipeline)
       .toArray();
 
-    // --- Top 10 Sold Items ---
-    const topSoldItemsPipeline = [
-      { $match: { as_of_date: asOfDate } },
+    // --- Sales Trend ---
+    const salesTrendPipeline = [
+      { $match: matchFilter },
       {
         $group: {
-          _id: "$itemId",
-          totalSold: { $sum: "$stock_sold" },
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$as_of_date" } },
+          value: { $sum: "$stock_sold" },
         },
       },
-      { $sort: { totalSold: -1 } },
-      { $limit: 10 },
-      {
-        $lookup: {
-          from: "itemMaster",
-          localField: "_id",
-          foreignField: "_id",
-          as: "itemInfo",
-        },
-      },
-      { $unwind: "$itemInfo" },
-      {
-        $project: {
-          name: "$itemInfo.Item Name",
-          value: "$totalSold",
-        },
-      },
+      { $sort: { _id: 1 } },
+      { $project: { name: "$_id", value: 1, _id: 0 } },
     ];
-    const topSoldItems = await stockCollection
-      .aggregate(topSoldItemsPipeline)
+    const salesTrend = await stockCollection
+      .aggregate(salesTrendPipeline)
       .toArray();
 
-    // --- Top 10 Stocked Items ---
-    const topStockedItemsPipeline = [
-      { $match: { as_of_date: asOfDate } },
-      {
-        $group: {
-          _id: "$itemId",
-          totalStock: { $sum: "$stock_left" },
-        },
-      },
-      { $sort: { totalStock: -1 } },
+    // --- Stock vs Sold ---
+    const stockVsSoldPipeline = [
+      { $match: matchFilter },
+      { $sort: { stock_sold: -1 } },
       { $limit: 10 },
       {
         $lookup: {
           from: "itemMaster",
-          localField: "_id",
+          localField: "itemId",
           foreignField: "_id",
-          as: "itemInfo",
+          as: "itemDetails",
         },
       },
-      { $unwind: "$itemInfo" },
+      { $unwind: "$itemDetails" },
       {
         $project: {
-          name: "$itemInfo.Item Name",
-          value: "$totalStock",
+          name: "$itemDetails.itemName",
+          stock_left: "$stock_left",
+          stock_sold: "$stock_sold",
+          _id: 0,
         },
       },
     ];
-    const topStockedItems = await stockCollection
-      .aggregate(topStockedItemsPipeline)
+    const stockVsSold = await stockCollection
+      .aggregate(stockVsSoldPipeline)
+      .toArray();
+
+    // --- Vendor Performance ---
+    const vendorPerformancePipeline = [
+      { $match: matchFilter },
+      {
+        $lookup: {
+          from: "itemMaster",
+          localField: "itemId",
+          foreignField: "_id",
+          as: "itemDetails",
+        },
+      },
+      { $unwind: "$itemDetails" },
+      {
+        $group: {
+          _id: "$itemDetails.Vendor",
+          value: { $sum: "$stock_left" },
+        },
+      },
+      { $sort: { value: -1 } },
+      { $limit: 5 },
+      { $project: { name: "$_id", value: 1, _id: 0 } },
+    ];
+    const vendorPerformance = await stockCollection
+      .aggregate(vendorPerformancePipeline)
       .toArray();
 
     return NextResponse.json({
       kpis,
       stockByDept,
-      topSoldItems,
-      topStockedItems,
+      salesTrend,
+      stockVsSold,
+      vendorPerformance,
     });
-  } catch (error: any) {
-    console.error("--- [API] Dashboard data fetch failed ---", error);
+  } catch (error) {
+    console.error("Error fetching dashboard data:", error);
     return NextResponse.json(
-      { message: "Failed to fetch dashboard data", error: error.message },
+      { error: "Internal Server Error" },
       { status: 500 }
     );
   }

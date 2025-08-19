@@ -13,12 +13,18 @@ import {
   Pie,
   Cell,
   Legend,
+  LineChart,
+  Line,
+  CartesianGrid,
 } from "recharts";
 import {
   AlertTriangle,
   Package,
   ShoppingCart,
   TrendingDown,
+  TrendingUp,
+  DollarSign,
+  Users,
 } from "lucide-react";
 
 interface DashboardData {
@@ -28,21 +34,27 @@ interface DashboardData {
     lowStockCount: number;
   };
   stockByDept: { name: string; value: number }[];
-  topSoldItems: { name: string; value: number }[];
-  topStockedItems: { name: string; value: number }[];
+  salesTrend: { name: string; value: number }[];
+  stockVsSold: { name: string; stock_left: number; stock_sold: number }[];
+  vendorPerformance: { name: string; value: number }[];
 }
 
-const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042"];
+const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#AF19FF"];
 
 const ChartCard = ({
   title,
+  icon: Icon,
   children,
 }: {
   title: string;
+  icon: React.ElementType;
   children: React.ReactNode;
 }) => (
-  <div className="bg-card p-6 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-300">
-    <h3 className="text-lg font-semibold text-foreground mb-4">{title}</h3>
+  <div className="bg-card p-6 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-300 text-card-foreground">
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="text-lg font-semibold">{title}</h3>
+      <Icon className="h-6 w-6 text-primary" />
+    </div>
     <div className="h-72 w-full">{children}</div>
   </div>
 );
@@ -71,11 +83,20 @@ export default function DashboardClient() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState({
+    from: "",
+    to: "",
+  });
 
   useEffect(() => {
     const fetchData = async () => {
+      setIsLoading(true);
       try {
-        const response = await fetch("/api/dashboard");
+        const params = new URLSearchParams();
+        if (dateRange.from) params.append("from", dateRange.from);
+        if (dateRange.to) params.append("to", dateRange.to);
+
+        const response = await fetch(`/api/dashboard?${params.toString()}`);
         if (!response.ok) {
           throw new Error("Failed to fetch dashboard data");
         }
@@ -88,7 +109,14 @@ export default function DashboardClient() {
       }
     };
     fetchData();
-  }, []);
+  }, [dateRange]);
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setDateRange({
+      ...dateRange,
+      [e.target.name]: e.target.value,
+    });
+  };
 
   if (isLoading) {
     return (
@@ -100,31 +128,40 @@ export default function DashboardClient() {
 
   if (error || !data) {
     return (
-      <div className="bg-destructive/10 text-destructive p-4 rounded-lg flex items-center">
-        <AlertTriangle className="mr-2" />
-        <p>Could not load dashboard data. Please try again later.</p>
+      <div className="bg-destructive/10 border-l-4 border-destructive text-destructive-foreground p-4 rounded-md">
+        <div className="flex items-center">
+          <AlertTriangle className="h-6 w-6 mr-3" />
+          <div>
+            <p className="font-bold">Error</p>
+            <p>{error || "Failed to load dashboard data."}</p>
+          </div>
+        </div>
       </div>
     );
   }
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-background/80 backdrop-blur-sm p-2 border border-border rounded-md shadow-lg">
-          <p className="font-bold">{label}</p>
-          <p className="text-sm text-primary">{`Quantity: ${payload[0].value}`}</p>
-        </div>
-      );
-    }
-    return null;
-  };
-
   return (
-    <div className="space-y-6">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div className="flex flex-col gap-8">
+      <div className="flex justify-end gap-4">
+        <input
+          type="date"
+          name="from"
+          value={dateRange.from}
+          onChange={handleDateChange}
+          className="bg-card text-card-foreground p-2 rounded-md"
+        />
+        <input
+          type="date"
+          name="to"
+          value={dateRange.to}
+          onChange={handleDateChange}
+          className="bg-card text-card-foreground p-2 rounded-md"
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <KpiCard
-          title="Total Stock Left"
+          title="Total Stock"
           value={data.kpis.totalStock.toLocaleString()}
           icon={Package}
         />
@@ -140,75 +177,8 @@ export default function DashboardClient() {
         />
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ChartCard title="Top 10 Most Sold Items">
-          <ResponsiveContainer>
-            <BarChart
-              data={data.topSoldItems}
-              layout="vertical"
-              margin={{ top: 5, right: 20, left: 80, bottom: 5 }}
-            >
-              <XAxis
-                type="number"
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
-              />
-              <YAxis
-                dataKey="name"
-                type="category"
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={10}
-                tick={{ width: 150 }}
-                interval={0}
-              />
-              <Tooltip
-                content={<CustomTooltip />}
-                cursor={{ fill: "hsl(var(--accent))" }}
-              />
-              <Bar
-                dataKey="value"
-                fill="hsl(var(--primary))"
-                radius={[0, 4, 4, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Top 10 Most Stocked Items">
-          <ResponsiveContainer>
-            <BarChart
-              data={data.topStockedItems}
-              layout="vertical"
-              margin={{ top: 5, right: 20, left: 80, bottom: 5 }}
-            >
-              <XAxis
-                type="number"
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
-              />
-              <YAxis
-                dataKey="name"
-                type="category"
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={10}
-                tick={{ width: 150 }}
-                interval={0}
-              />
-              <Tooltip
-                content={<CustomTooltip />}
-                cursor={{ fill: "hsl(var(--accent))" }}
-              />
-              <Bar
-                dataKey="value"
-                fill="hsl(var(--primary))"
-                radius={[0, 4, 4, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Stock Distribution by Department">
+      <div className="grid md:grid-cols-1 lg:grid-cols-2 gap-8">
+        <ChartCard title="Stock by Department" icon={DollarSign}>
           <ResponsiveContainer>
             <PieChart>
               <Pie
@@ -216,13 +186,10 @@ export default function DashboardClient() {
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                outerRadius={100}
+                outerRadius={80}
                 fill="#8884d8"
                 dataKey="value"
                 nameKey="name"
-                label={({ name, percent }) =>
-                  `${name} ${(percent * 100).toFixed(0)}%`
-                }
               >
                 {data.stockByDept.map((entry, index) => (
                   <Cell
@@ -232,8 +199,60 @@ export default function DashboardClient() {
                 ))}
               </Pie>
               <Tooltip />
-              <Legend />
+              <Legend wrapperStyle={{ color: "var(--chart-label-color)" }} />
             </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Sales Trend" icon={TrendingUp}>
+          <ResponsiveContainer>
+            <LineChart data={data.salesTrend}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" stroke="var(--chart-label-color)" />
+              <YAxis stroke="var(--chart-label-color)" />
+              <Tooltip />
+              <Legend wrapperStyle={{ color: "var(--chart-label-color)" }} />
+              <Line type="monotone" dataKey="value" stroke="#8884d8" />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+
+      <div className="grid md:grid-cols-1 lg:grid-cols-2 gap-8">
+        <ChartCard title="Stock vs. Sold (Top 10)" icon={ShoppingCart}>
+          <ResponsiveContainer>
+            <BarChart data={data.stockVsSold}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" stroke="var(--chart-label-color)" />
+              <YAxis stroke="var(--chart-label-color)" />
+              <Tooltip />
+              <Legend wrapperStyle={{ color: "var(--chart-label-color)" }} />
+              <Bar
+                dataKey="stock_left"
+                stackId="a"
+                fill="#8884d8"
+                name="Stock Left"
+              />
+              <Bar
+                dataKey="stock_sold"
+                stackId="a"
+                fill="#82ca9d"
+                name="Stock Sold"
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Vendor Performance (Top 5)" icon={Users}>
+          <ResponsiveContainer>
+            <BarChart data={data.vendorPerformance}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" stroke="var(--chart-label-color)" />
+              <YAxis stroke="var(--chart-label-color)" />
+              <Tooltip />
+              <Legend wrapperStyle={{ color: "var(--chart-label-color)" }} />
+              <Bar dataKey="value" fill="#FF8042" name="Total Stock" />
+            </BarChart>
           </ResponsiveContainer>
         </ChartCard>
       </div>
